@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    {{- include "nginx.labels" . | nindent 4 }}
+  name: {{ include "nginx.fullname" . }}
+spec:
+  groups:
+  - name: example
+    rules:
+    - alert: TargetDownNginx
+      annotations:
+        message: 'nginx XXx are down.'
+      expr: nginx_up == 0
+      for: 1m
+      labels:
+        severity: critical
+

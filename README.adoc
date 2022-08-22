@@ -1,0 +1,255 @@
+= Getting Information about Monitoring RHOCP 
+ifdef::localdir[]
+:OLDlocaldir: {localdir}
+:localdir: ./Chapter-Ansible/
+endif::localdir[]
+ifndef::localdir[]
+:localdir: ./
+:copyright: (C) 2022 IBM
+:orgname: IBM
+:toc: right
+:title-page:
+:data-uri:
+:sectnums:
+:sectnumlevels: 4
+:toclevels: 4
+:allow-uri-read: true
+:doctype: article
+:source-highlighter: rouge
+:icons: font
+:pdf-page-size: A4
+:pdf-stylesdir: lib/themes
+:pdf-style: ibm-theme.yml
+:pdf-fontsdir: lib/fonts
+:listing-caption: Listing
+:ibm-classification:
+:title-logo-image: image::images/Chapter-Ansible-6d90d.png[pdfwidth=4in,align=right]
+endif::localdir[]
+:imagesdir: {localdir}
+
+Author: Juergen Statnik <juergen.statnik@de.ibm.com>
+
+[abstract]
+--
+[quote, John Delaney]
+____
+“The way you deal with automation is by upgrading people's skills so they can get the jobs of the future.”
+____
+--
+
+
+== OCP 4.9 Monitoring
+
+=== Enabling User Monitorings and Test container
+---
+RedHat Access-infopage: link:https://access.redhat.com/documentation/en-us/openshift_container_platform/4.10/html-single/monitoring/index#configuring-the-monitoring-stack[access.red.hat] +
+RedHat OCP-Page: link:https://docs.openshift.com/container-platform/4.10/monitoring/monitoring-overview.html[OCP Doku] 
+---
+
+https://access.redhat.com/documentation/en-us/openshift_container_platform/4.9/html/monitoring/configuring-the-monitoring-stack[OPC4.9 Monitoring link]
+
+=== Monitoring overview
+Default platform monitoring components -> openshift-monitoring project
+
+Components for monitoring user-defined projects -> openshift-user-workload-monitoring
+
+==== Prometheus Overview Components
+[#img#prometheus]
+.Overview Prometheus Componets
+image::./png/RHOCP_prometheus.png[Prometheus Components,800,500]
+
+Grafana dashboard is read-only 
+
+==== Default Targets 
+* CoreDNS
+* Elasticsearch (if Logging is installed)
+* etcd
+* Fluentd (if Logging is installed)
+* HAProxy
+* Image registry
+* Kubelets
+* Kubernetes API server
+* Kubernetes controller manager
+* Kubernetes scheduler
+* Metering (if Metering is installed)
+* OpenShift API server
+* OpenShift Controller Manager
+* Operator Lifecycle Manager (OLM) 
+
+==== Monitoring targets for user-defined projects
+When monitoring is enabled for user-defined projects, you can monitor:
+
+* Metrics provided through service endpoints in user-defined projects.
+* Pods running in user-defined projects.
+
+===  Configuring the monitoring stack 
+
+https://access.redhat.com/documentation/en-us/openshift_container_platform/4.9/html-single/scalability_and_performance/#scaling-cluster-monitoring-operator[Prerequistes - Scaling the Cluster Monitoring Operator]
+
+==== Creating a cluster monitoring config map
+create the cluster-monitoring-config ConfigMap object in the openshift-monitoring project +
+
+$ oc -n openshift-monitoring get configmap cluster-monitoring-config
+
+[source,yaml]
+----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+----
+
+$ oc apply -f cluster-monitoring-config.yaml
+
+==== Creating a user-defined workload monitoring config map
+create the user-workload-monitoring-config ConfigMap object in the openshift-user-workload-monitoring project +
+
+* Prerequisites +
+** You have access to the cluster as a user with the cluster-admin role. +
+** You have installed the OpenShift CLI (oc). +
+
+$ oc -n openshift-monitoring get configmap user-workload-monitoring-config
+
+`oc apply -f conf_monitor_stack/cluster-monitoring-config.yaml`
+
+[source,yaml]
+----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-workload-monitoring-config
+  namespace: openshift-user-workload-monitoring
+data:
+  config.yaml: |
+    prometheus: 
+      retention: 24h 
+      resources:
+        requests:
+          cpu: 200m 
+          memory: 2Gi 
+----
+
+`$ oc apply -f conf_monitor_stack/user-workload-monitoring-config.yaml`
+
+==== Enable user defined projects: 
+`enableUserWorkload: true`
+
+[source,yaml]
+----
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    prometheusK8s:
+      retention: 24h
+    enableUserWorkload: true
+    alertmanagerMain:
+      enableUserAlertmanagerConfig: true
+----
+
+==== Check ob Enabled 
+
+`oc apply -f conf_monitor_stack/enable_workload_cluster-monitoring-config.yaml`
+
+`$ oc get pods -n openshift-user-workload-monitoring`
+
+----
+NAME                                   READY   STATUS    RESTARTS   AGE
+prometheus-operator-75d67487b4-8d8td   2/2     Running   0          36h
+prometheus-user-workload-0             5/5     Running   0          30h
+prometheus-user-workload-1             5/5     Running   0          30h
+thanos-ruler-user-workload-0           3/3     Running   0          36h
+thanos-ruler-user-workload-1           3/3     Running   0          36h
+
+----
+
+=== Using test pod to see user metrics 
+
+Helm chart to install nginx test container :
+
+https://github.ibm.com/juergen-statnik/RHOCP/tree/main/test_userworkload/nginx[helm chart to install nginx]
+
+define project:
+
+`oc new-project nginx-monitor` 
+
+`helm install nginx . --dry-run` to see what happens + 
+
+`helm install nginx .`  
+
+After this installation metrics are visible in Observe -> Metrics -> nginx_up ( RUN QUERIES ) as Administrator 
+
+As Developer you have to choose Observe -> Metrics and ENTER your custom metrics `nginx_up`
+
+image::./png/NGINX-Observer-Metrics-custom-query.png[Developer Observer Metrics,800,500]
+
+
+=== Using Grafana to view nginx metrics
+
+==== Deploying Custom Grafana
+
+Install Grafana Grafana Operator in own namespace -> nginx-monitor
+
+===== Create Instance
+
+----
+apiVersion: integreatly.org/v1alpha1
+kind: Grafana
+metadata:
+  name: nginx-grafana
+  namespace: nginx-monitor
+----
+
+===== Connecting Prometheus to our Custom Grafana
+
+----
+oc adm policy add-cluster-role-to-user cluster-monitoring-view -z grafana-serviceaccount +
+oc adm policy add-cluster-role-to-user view -z grafana-serviceaccount +
+
+oc serviceaccounts get-token grafana-serviceaccount -n nginx-monitor +
+ GET THE BEARER_TOKEN +
+----
+
+===== Data Source 
+
+----
+apiVersion: integreatly.org/v1alpha1
+kind: GrafanaDataSource
+metadata:
+  name: prometheus-grafanadatasource
+  namespace: nginx-monitor 
+spec:
+  datasources:
+    - access: proxy
+      editable: true
+      isDefault: true
+      jsonData:
+        httpHeaderName1: 'Authorization'
+        timeInterval: 5s
+        tlsSkipVerify: true
+      name: Prometheus
+      secureJsonData:
+        httpHeaderValue1: 'Bearer ${BEARER_TOKEN}'
+      type: prometheus
+      url: 'https://thanos-querier.openshift-monitoring.svc.cluster.local:9091'
+  name: prometheus-grafanadatasource.yaml
+---- 
+
+==== Get User and Password from Custom-Grafana
+
+oc get secret -n <my-grafana-ns>
+
+oc get secret grafana-admin-credentials -o yaml -n <my-grafana-ns>
+
+
+----
+data:
+  GF_SECURITY_ADMIN_PASSWORD: MWxfMmg0NzN0X2lXXXXXX==
+  GF_SECURITY_ADMIN_USER: YWRtaW4=
+ echo "YWRtaW4=" | base64 --decode                   >> admin
+ echo "MWxfMmg0NzN0X2lXXXXXX==" | base64 --decode   >> 1l_2.......
+----

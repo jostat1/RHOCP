@@ -1,0 +1,5 @@
+kind: Grafana
+apiVersion: integreatly.org/v1alpha1
+metadata:
+  namespace: nginx-monitor 
+  name: cluster-nginx-grafana
