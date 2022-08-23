@@ -166,8 +166,149 @@ thanos-ruler-user-workload-0           3/3     Running   0          36h
 thanos-ruler-user-workload-1           3/3     Running   0          36h
 
 ----
+=== Get metrics from pods 
 
-=== Using test pod to see user metrics 
+To get metrics this could be happen on two ways: 
+
+==== First is using the Prometheus client libs inside the pod 
+
+Enable Prometheus in the Spring Boot app.
+
+Adding further dependencies for Spring Boot makes the application ready for exposing Prometheus metrics through a new endpoint: /actuator/prometheus.
+
+The following example shows the Spring Boot 2.x pom.xml file with Prometheus dependencies:
+
+----
+ <dependency>
+   <groupId>org.springframework.boot</groupId>
+   <artifactId>spring-boot-starter-actuator</artifactId>
+ </dependency>
+
+ <!-- Prometheus Support with Micrometer -->
+ <dependency>
+   <groupId>io.micrometer</groupId>
+   <artifactId>micrometer-core</artifactId>
+ </dependency>
+
+ <dependency>
+   <groupId>io.micrometer</groupId>
+   <artifactId>micrometer-registry-prometheus</artifactId>
+ </dependency>
+----
+
+By default prometheus endpoint is not available and must be enabled in application.properties. More configurations 
+can be found at spring-boot https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#actuator.metrics.export.prometheu[docs]
+
+----
+#Metrics related configurations
+management.endpoint.metrics.enabled=true
+management.endpoints.web.exposure.include=*
+management.endpoint.prometheus.enabled=true
+management.metrics.export.prometheus.enabled=true
+management.metrics.distribution.percentiles-histogram.http.server.requests=true
+management.metrics.distribution.sla.http.server.requests=1ms,5ms
+management.metrics.distribution.percentiles.http.server.requests=0.5,0.9,0.95,0.99,0.999
+----
+
+After you start up, you can reach the new endpoint at localhost:8080/actuator/prometheus.
+
+See the following example from Prometheus endpoint:
+
+----
+ # HELP tomcat_global_received_bytes_total
+ # TYPE tomcat_global_received_bytes_total counter
+ tomcat_global_received_bytes_total{name="http-nio-8080",} 0.0
+ # HELP tomcat_sessions_rejected_sessions_total
+ # TYPE tomcat_sessions_rejected_sessions_total counter
+ tomcat_sessions_rejected_sessions_total 0.0
+ # HELP jvm_threads_states_threads The current number of threads having NEW state
+ # TYPE jvm_threads_states_threads gauge
+ jvm_threads_states_threads{state="runnable",} 7.0
+ jvm_threads_states_threads{state="blocked",} 0.0
+ jvm_threads_states_threads{state="waiting",} 12.0
+ jvm_threads_states_threads{state="timed-waiting",} 4.0
+ jvm_threads_states_threads{state="new",} 0.0
+ jvm_threads_states_threads{state="terminated",} 0.0
+ # HELP logback_events_total Number of error level events that made it to the logs
+ # TYPE logback_events_total counter
+ logback_events_total{level="warn",} 0.0
+ logback_events_total{level="debug",} 0.0
+ logback_events_total{level="error",} 0.0
+ logback_events_total{level="trace",} 0.0
+ logback_events_total{level="info",} 11.0
+ # HELP jvm_gc_pause_seconds Time spent in GC pause
+ # TYPE jvm_gc_pause_seconds summary
+ jvm_gc_pause_seconds_count{action="end of major GC",cause="Metadata GC Threshold",} 1.0
+ jvm_gc_pause_seconds_sum{action="end of major GC",cause="Metadata GC Threshold",} 0.046
+ jvm_gc_pause_seconds_count{action="end of minor GC",cause="Metadata GC Threshold",} 1.0
+ ...
+----
+
+==== Create custom metrics
+
+Integrating Prometheus libraries in Spring Boot results in a base set of metrics. If you need custom metrics, you can create your own metrics.
+
+Metrics are uniquely identified by name and tags. The tags allow multiple views per dimension on the same metric. The following basic metrics are commonly supported:
+
+Counter: A single metric, the count.
+
+Timer: A metric for short-duration latency and frequency of the occurrence of an event (at minimum, including the total and county information).
+
+Gauge: A metric that represents the current value, such as collection size.
+
+The following code listing displays the counter integration for a Spring Boot REST endpoint. It is a Java snippet for Spring Boot plus the meter and Prometheus support with two counters:
+----
+@RestController
+@RequestMapping("/data/v1")
+public class DataRest {
+
+  // Metric Counter to collect the amount of Echo calls
+    private Counter reqEchoCounter;
+
+  // Metric Counter to collect the amount of Timestamp calls
+    private Counter reqTimestampCounter;
+
+    public DataRest(final MeterRegistry registry) {
+
+    // Register the Countere with a metric named and different tags
+        reqEchoCounter = registry.counter("data_rest", "usecase", "echo");
+        reqTimestampCounter = registry.counter("data_rest", "usecase", "timestamp");
+    }
+
+    @ApiOperation(value = "Delivers the given string back; like an Echo service.", response = String.class)
+    @GetMapping("/echo/{val}")
+    public String simpleEcho(@PathVariable(value = "val") String val) {
+
+        reqEchoCounter.increment();
+        return String.format("Data: {%s}", val);
+    }
+
+    @ApiOperation(value = "Delivers the given string with the current timestamp (long) back; like an Echo service.", response = String.class)
+    @GetMapping("/timestamp/{val}")
+    public String simpleEchoWithTimestamp(@PathVariable(value = "val") String val) {
+
+        reqTimestampCounter.increment();
+        return String.format("Data: %d - {%s}", System.currentTimeMillis(), val);
+    }
+}
+----
+
+The following code listing shows the result from the Prometheus endpoint with the two new counters:
+
+----
+# HELP data_rest_total
+# TYPE data_rest_total counter
+data_rest_total{usecase="echo",} 10.0
+data_rest_total{usecase="timestamp",} 0.0
+...
+----
+
+`How using this metrics for Grafana will be shown in the nginx example with nginx_up and nginx_connections_... ` 
+
+
+Second use an Exporter container to get the application metrics - this solution is done with nginx example 
+
+=== Using test pod to see user metrics with exporter container 
 
 Helm chart to install nginx test container :
 
