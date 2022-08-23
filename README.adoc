@@ -253,3 +253,18 @@ data:
  echo "YWRtaW4=" | base64 --decode                   >> admin
  echo "MWxfMmg0NzN0X2lXXXXXX==" | base64 --decode   >> 1l_2.......
 ----
+
+==== Create route for Grafana console login: 
+
+----
+oc get route -n nginx-monitor 
+oc expose svc grafana-service -n nginx-monitor 
+
+oc get route grafana-service -n nginx-monitor
+---- 
+get url for conole-login or open inside Openshift Console 
+
+
+==== Grafana Dashboard 
+
+image::./png/Grafana_nginx_metrics.png[Grafana NGINX metrics,800,500]
